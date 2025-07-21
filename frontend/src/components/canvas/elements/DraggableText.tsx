@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ContextMenu from './ContextMenu';
 import type { TextElement } from '../../../types/element';
+import styles from './DraggableText.module.css';
 
 interface DraggableTextProps extends Omit<TextElement, 'type'> {
   isSelected: boolean;
@@ -32,7 +33,6 @@ const DraggableText: React.FC<DraggableTextProps> = ({
   onDragEnd,
   onResize,
   onUpdate,
-  style,
   zIndex,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
@@ -154,23 +154,35 @@ const DraggableText: React.FC<DraggableTextProps> = ({
     }
   };
 
-  const cursorStyle = isResizing ? 'nwse-resize' : isDragging ? 'grabbing' : 'move';
+  const cursorStyle = isResizing ? styles.draggableTextResizing : isDragging ? styles.draggableTextDragging : '';
+  const selectedClass = isSelected ? styles.selected : '';
+
+  const dynamicClasses = [
+    styles.draggableText,
+    cursorStyle,
+    selectedClass,
+    isSelected ? styles.selected : ''
+  ].filter(Boolean).join(' ');
 
   return (
     <div
       ref={elementRef}
       onMouseDown={handleMouseDown}
       onContextMenu={handleContextMenu}
+      onDoubleClick={handleDoubleClick}
+      className={dynamicClasses}
       style={{
-        position: 'absolute',
-        left: x,
-        top: y,
-        width: dimensions.width,
-        minHeight: dimensions.height,
-        cursor: cursorStyle,
-        zIndex,
-        ...style,
-      }}
+        '--left': `${x}px`,
+        '--top': `${y}px`,
+        '--width': `${dimensions.width}px`,
+        '--min-height': `${dimensions.height}px`,
+        '--z-index': zIndex,
+        '--font-size': `${fontSize}px`,
+        '--color': color,
+        '--font-family': fontFamily,
+        '--text-align': textAlign,
+      } as React.CSSProperties}
+      data-testid="draggable-text"
     >
       {isEditing ? (
         <input
@@ -183,42 +195,28 @@ const DraggableText: React.FC<DraggableTextProps> = ({
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           autoFocus
-          style={{
+          className={styles.textInput}
+          style={{ 
+            fontSize: `${fontSize}px`,
+            color,
+            fontFamily,
+            textAlign: textAlign as 'left' | 'center' | 'right' | 'justify',
             width: '100%',
             height: '100%',
-            border: 'none',
-            outline: 'none',
-            fontSize: `${fontSize}px`,
-            fontFamily,
-            color,
-            textAlign: textAlign as 'left' | 'center' | 'right',
-            background: 'transparent',
-            padding: '2px',
-            boxSizing: 'border-box',
           }}
         />
       ) : (
-        <div
+        <div 
+          className={styles.textContent}
           style={{
-            width: '100%',
-            height: '100%',
             fontSize: `${fontSize}px`,
-            fontFamily,
             color,
-            textAlign: textAlign as 'left' | 'center' | 'right',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            border: isSelected ? '2px dashed #1976d2' : 'none',
-            padding: '2px',
-            boxSizing: 'border-box',
-            userSelect: 'none',
+            fontFamily,
+            textAlign: textAlign as 'left' | 'center' | 'right' | 'justify',
           }}
-          onDoubleClick={handleDoubleClick}
-        >
-          {textContent}
-        </div>
+          dangerouslySetInnerHTML={{ __html: textContent.replace(/\n/g, '<br />') }}
+        />
       )}
-
       {/* Resize handle */}
       {isSelected && !isResizing && (
         <div
@@ -241,7 +239,6 @@ const DraggableText: React.FC<DraggableTextProps> = ({
           }}
         />
       )}
-
       {/* Context Menu */}
       <ContextMenu
         contextMenu={contextMenu}
