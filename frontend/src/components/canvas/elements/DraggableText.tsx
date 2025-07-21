@@ -176,6 +176,8 @@ const DraggableText: React.FC<DraggableTextProps> = ({
         <input
           ref={inputRef}
           type="text"
+          aria-label="Edit text content"
+          placeholder="Type your text here"
           value={textContent}
           onChange={(e) => setTextContent(e.target.value)}
           onBlur={handleBlur}
