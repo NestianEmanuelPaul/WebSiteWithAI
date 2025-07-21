@@ -58,6 +58,7 @@ export const DraggableButton: FC<DraggableButtonProps> = ({
     width: initialWidth,
     height: initialHeight
   });
+  const [hover, setHover] = useState(false);
   const buttonRef = useRef<HTMLDivElement | null>(null);
 
   // Clean up any global styles when component unmounts
@@ -74,7 +75,7 @@ export const DraggableButton: FC<DraggableButtonProps> = ({
 
   const handleContextMenu = (event: ReactMouseEvent) => {
     event.preventDefault();
-    onSelect();
+    onSelect?.();
     setContextMenu(
       contextMenu === null
         ? { mouseX: event.clientX, mouseY: event.clientY }
@@ -87,7 +88,9 @@ export const DraggableButton: FC<DraggableButtonProps> = ({
   };
 
   const handleDelete = () => {
-    onDelete(id);
+    if (onDelete) {
+      onDelete(id);
+    }
     handleCloseContextMenu();
   };
 
@@ -107,7 +110,7 @@ export const DraggableButton: FC<DraggableButtonProps> = ({
     
     setStartPos({ x: e.clientX, y: e.clientY });
     setIsDragging(true);
-    onSelect();
+    onSelect?.();
   }, [onSelect]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -154,6 +157,13 @@ export const DraggableButton: FC<DraggableButtonProps> = ({
     }
   }, [isDragging, isResizing, handleMouseMove, handleMouseUp]);
 
+  const handleMouseEnter = () => {
+    setHover(true);
+  };
+
+  const handleMouseLeave = () => {
+    setHover(false);
+  };
 
   return (
     <Box
@@ -175,11 +185,11 @@ export const DraggableButton: FC<DraggableButtonProps> = ({
       onContextMenu={handleContextMenu}
       onClick={(e) => {
         e.stopPropagation();
-        if (onSelect) onSelect();
+        onSelect?.();
         onClick(e);
       }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       <Paper
         elevation={2}
@@ -222,7 +232,7 @@ export const DraggableButton: FC<DraggableButtonProps> = ({
               e.stopPropagation();
               setIsResizing(true);
               setStartPos({ x: e.clientX, y: e.clientY });
-              onSelect();
+              onSelect?.();
             }}
             sx={{
               position: 'absolute',
@@ -260,7 +270,7 @@ export const DraggableButton: FC<DraggableButtonProps> = ({
           }}
           onClick={(e) => {
             e.stopPropagation();
-            if (onSelect) onSelect();
+            onSelect?.();
             onClick(e);
           }}
         >
