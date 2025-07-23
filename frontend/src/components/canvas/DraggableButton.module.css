@@ -1,0 +1,68 @@
+/* Resize handle styles */
+.resizeHandle {
+  position: absolute;
+  bottom: -6px;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: se-resize;
+  background-color: #1976d2;
+  border-radius: 2px 0 4px 0;
+  z-index: 10;
+}
+
+.resizeHandleTop {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 40%;
+  height: 6px;
+  cursor: ns-resize;
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+  background-color: #1976d2;
+}
+
+/* Button container styles */
+.buttonContainer {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  outline: none;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Button text styles */
+.buttonText {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  padding: 0 8px;
+}
+
+/* Selection outline styles */
+.selectionOutline {
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  border: 2px dashed #1976d2;
+  pointer-events: none;
+  z-index: 1;
+  border-radius: 4px;
+}

@@ -1,10 +1,9 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import type { FC, CSSProperties, MouseEvent as ReactMouseEvent } from 'react';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import DeleteIcon from '@mui/icons-material/Delete';
 import Paper from '@mui/material/Paper';
-import ContextMenu from './ContextMenu';
 
 export interface DraggableButtonProps {
   id: string;
@@ -26,7 +25,6 @@ export interface DraggableButtonProps {
   onDragEnd?: (id: string) => void;
   checked?: boolean;
   onSetMoveMode?: (id: string, mode: 'move' | 'resize' | null) => void;
-  onContextMenu?: (e: React.MouseEvent) => void;
   inMoveMode?: boolean;
   onChange?: (updates: Record<string, any>) => void;
   onSelect?: () => void;
@@ -47,13 +45,11 @@ export const DraggableButton: FC<DraggableButtonProps> = ({
   onDelete,
   onDragMove,
   onDragEnd,
-  inMoveMode = false,
   onSelect
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
-  const [contextMenu, setContextMenu] = useState<{ mouseX: number; mouseY: number } | null>(null);
   const [dimensions, setDimensions] = useState({
     width: initialWidth,
     height: initialHeight
@@ -73,79 +69,58 @@ export const DraggableButton: FC<DraggableButtonProps> = ({
     setDimensions({ width: initialWidth, height: initialHeight });
   }, [initialWidth, initialHeight]);
 
-  const handleContextMenu = (event: ReactMouseEvent) => {
-    event.preventDefault();
-    onSelect?.();
-    setContextMenu(
-      contextMenu === null
-        ? { mouseX: event.clientX, mouseY: event.clientY }
-        : null,
-    );
-  };
-
-  const handleCloseContextMenu = () => {
-    setContextMenu(null);
-  };
-
-  const handleDelete = () => {
-    if (onDelete) {
-      onDelete(id);
-    }
-    handleCloseContextMenu();
-  };
-
-  const handleMove = () => {
-    setIsResizing(false);
-    handleCloseContextMenu();
-  };
-
-  const handleResize = () => {
-    setIsResizing(true);
-    handleCloseContextMenu();
-  };
-
   const handleMouseDown = useCallback((e: ReactMouseEvent) => {
-    if (e.button !== 0) return; // Only left mouse button
     e.stopPropagation();
-    
-    setStartPos({ x: e.clientX, y: e.clientY });
-    setIsDragging(true);
     onSelect?.();
+    
+    // Only start dragging if not clicking on the delete button or resize handle
+    const target = e.target as HTMLElement;
+    const isDeleteButton = target.closest('button[aria-label="delete"]') !== null;
+    const isResizeHandle = target === resizeHandleRef.current;
+    
+    if (!isDeleteButton && !isResizeHandle) {
+      setIsDragging(true);
+      setStartPos({ x: e.clientX, y: e.clientY });
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'move';
+    } else if (isResizeHandle) {
+      // Handle resize
+      e.stopPropagation();
+      setIsResizing(true);
+      setStartPos({ x: e.clientX, y: e.clientY });
+      document.body.style.cursor = 'nwse-resize';
+    }
   }, [onSelect]);
 
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!isDragging && !isResizing) return;
-    
-    const dx = e.clientX - startPos.x;
-    const dy = e.clientY - startPos.y;
-    
-    if (isResizing) {
-      const newWidth = Math.max(80, dimensions.width + dx);
-      const newHeight = Math.max(32, dimensions.height + dy);
-      setDimensions({ width: newWidth, height: newHeight });
-      if (onResize) {
-        onResize(id, newWidth, newHeight);
-      }
-    } else {
-      if (onDragMove) {
+  const handleMouseMove = useCallback(
+    (e: MouseEvent) => {
+      if (isDragging && onDragMove) {
+        const dx = e.clientX - startPos.x;
+        const dy = e.clientY - startPos.y;
         onDragMove(id, dx, dy);
+        setStartPos({ x: e.clientX, y: e.clientY });
+      } else if (isResizing && onResize) {
+        const newWidth = Math.max(80, dimensions.width + (e.clientX - startPos.x));
+        const newHeight = Math.max(30, dimensions.height + (e.clientY - startPos.y));
+        setDimensions({ width: newWidth, height: newHeight });
+        onResize(id, newWidth, newHeight);
+        setStartPos({ x: e.clientX, y: e.clientY });
       }
-    }
-    
-    setStartPos({ x: e.clientX, y: e.clientY });
-  }, [isDragging, isResizing, startPos, onDragMove, id, dimensions, onResize]);
+    },
+    [isDragging, isResizing, startPos, onDragMove, onResize, id, dimensions]
+  );
 
   const handleMouseUp = useCallback(() => {
-    if (isDragging || isResizing) {
-      setIsDragging(false);
-      setIsResizing(false);
-      if (onDragEnd) {
-        onDragEnd(id);
-      }
+    setIsDragging(false);
+    setIsResizing(false);
+    document.body.style.userSelect = '';
+    document.body.style.cursor = '';
+    
+    if (onDragEnd) {
+      onDragEnd(id);
     }
-  }, [isDragging, isResizing, onDragEnd, id]);
+  }, [id, onDragEnd]);
 
-  // Set up event listeners for dragging/resizing
   useEffect(() => {
     if (isDragging || isResizing) {
       document.addEventListener('mousemove', handleMouseMove);
@@ -157,42 +132,39 @@ export const DraggableButton: FC<DraggableButtonProps> = ({
     }
   }, [isDragging, isResizing, handleMouseMove, handleMouseUp]);
 
-  const handleMouseEnter = () => {
-    setHover(true);
+  const handleDelete = (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    if (onDelete) {
+      onDelete(id);
+    }
   };
 
-  const handleMouseLeave = () => {
-    setHover(false);
-  };
+  const resizeHandleRef = useRef<HTMLDivElement>(null);
 
   return (
     <Box
       ref={buttonRef}
-      position="absolute"
-      left={x}
-      top={y}
-      width={dimensions.width}
-      height={dimensions.height}
-      zIndex={zIndex}
-      sx={{
-        border: isSelected ? '2px dashed #1976d2' : 'none',
-        '&:hover': {
-          cursor: inMoveMode ? 'move' : 'default',
-        },
-        ...style,
-      }}
       onMouseDown={handleMouseDown}
-      onContextMenu={handleContextMenu}
       onClick={(e) => {
         e.stopPropagation();
         onSelect?.();
         onClick(e);
       }}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        position: 'absolute',
+        left: x,
+        top: y,
+        width: dimensions.width,
+        height: dimensions.height,
+        zIndex: zIndex,
+        cursor: 'pointer',
+        ...style,
+      }}
     >
       <Paper
-        elevation={2}
+        elevation={isSelected ? 8 : 2}
         sx={{
           width: '100%',
           height: '100%',
@@ -201,90 +173,46 @@ export const DraggableButton: FC<DraggableButtonProps> = ({
           justifyContent: 'center',
           position: 'relative',
           overflow: 'hidden',
-          backgroundColor: 'white',
+          '&:hover': {
+            boxShadow: isSelected ? 8 : 4,
+          },
         }}
-        variant={isSelected ? 'outlined' : 'elevation'}
       >
-        {/* Delete button */}
-        {isSelected && hover && onDelete && (
-          <IconButton
-            size="small"
-            onClick={handleDelete}
-            sx={{
-              position: 'absolute',
-              top: 0,
-              right: 0,
-              zIndex: 1,
-              backgroundColor: 'white',
-              '&:hover': {
-                backgroundColor: '#f5f5f5',
-              },
-            }}
-          >
-            <DeleteIcon fontSize="small" />
-          </IconButton>
+        <Box sx={{ textAlign: 'center', padding: 1 }}>{text}</Box>
+        
+        {isSelected && (
+          <>
+            <div
+              ref={resizeHandleRef}
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                right: 0,
+                width: 12,
+                height: 12,
+                backgroundColor: 'primary.main',
+                cursor: 'nwse-resize',
+                borderTopLeftRadius: '2px',
+              }}
+            />
+            
+            <IconButton
+              size="small"
+              onClick={handleDelete}
+              sx={{
+                position: 'absolute',
+                top: 0,
+                right: 0,
+                backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                '&:hover': {
+                  backgroundColor: 'rgba(255, 0, 0, 0.2)',
+                },
+              }}
+            >
+              <DeleteIcon fontSize="small" color="error" />
+            </IconButton>
+          </>
         )}
-
-        {/* Resize handle */}
-        {isSelected && !isResizing && (
-          <Box
-            onMouseDown={(e) => {
-              e.stopPropagation();
-              setIsResizing(true);
-              setStartPos({ x: e.clientX, y: e.clientY });
-              onSelect?.();
-            }}
-            sx={{
-              position: 'absolute',
-              right: -4,
-              bottom: -4,
-              width: 12,
-              height: 12,
-              backgroundColor: '#1976d2',
-              borderRadius: '50%',
-              cursor: 'nwse-resize',
-              zIndex: 2,
-              border: '1px solid white',
-            }}
-          />
-        )}
-
-        {/* Button content */}
-        <Box
-          component="button"
-          sx={{
-            width: '100%',
-            height: '100%',
-            border: 'none',
-            background: 'none',
-            padding: '8px 16px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            position: 'relative',
-            zIndex: 0,
-            '&:focus': {
-              outline: 'none',
-            },
-          }}
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelect?.();
-            onClick(e);
-          }}
-        >
-          {text}
-        </Box>
-
-        {/* Context Menu */}
-        <ContextMenu
-          contextMenu={contextMenu}
-          onClose={handleCloseContextMenu}
-          onDelete={handleDelete}
-          onMove={handleMove}
-          onResize={handleResize}
-        />
       </Paper>
     </Box>
   );

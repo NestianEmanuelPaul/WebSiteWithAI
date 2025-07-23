@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Checkbox } from '@mui/material';
-import ContextMenu from './ContextMenu';
+import { Checkbox, IconButton } from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
 import type { CheckboxElement } from '../../../types/element';
+import Box from '@mui/material/Box';
+import Paper from '@mui/material/Paper';
 
 interface DraggableCheckboxProps extends Omit<CheckboxElement, 'type'> {
   isSelected: boolean;
@@ -12,14 +14,15 @@ interface DraggableCheckboxProps extends Omit<CheckboxElement, 'type'> {
   onResize: (id: string, width: number, height: number) => void;
   onUpdate: (updates: Partial<CheckboxElement>) => void;
   style?: React.CSSProperties;
+  zIndex: number;
 }
 
 const DraggableCheckbox: React.FC<DraggableCheckboxProps> = ({
   id,
   x,
   y,
-  width = 120,
-  height = 24,
+  width: initialWidth = 150,
+  height: initialHeight = 40,
   label = 'Checkbox',
   checked = false,
   isSelected,
@@ -35,80 +38,72 @@ const DraggableCheckbox: React.FC<DraggableCheckboxProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
-  const [contextMenu, setContextMenu] = useState<{ mouseX: number; mouseY: number } | null>(null);
-  const [dimensions, setDimensions] = useState({ width, height });
+  const [dimensions, setDimensions] = useState({ width: initialWidth, height: initialHeight });
+  const [hover, setHover] = useState(false);
   const elementRef = useRef<HTMLDivElement>(null);
+  const resizeHandleRef = useRef<HTMLDivElement>(null);
 
   // Update dimensions when props change
   useEffect(() => {
-    setDimensions({ width, height });
-  }, [width, height]);
+    setDimensions({ width: initialWidth, height: initialHeight });
+  }, [initialWidth, initialHeight]);
 
-  const handleContextMenu = (event: React.MouseEvent) => {
-    event.preventDefault();
-    onSelect();
-    setContextMenu(
-      contextMenu === null
-        ? { mouseX: event.clientX, mouseY: event.clientY }
-        : null,
-    );
-  };
-
-  const handleCloseContextMenu = () => {
-    setContextMenu(null);
-  };
-
-  const handleDelete = () => {
-    onDelete();
-    handleCloseContextMenu();
-  };
-
-  const handleMove = () => {
-    setIsResizing(false);
-    handleCloseContextMenu();
-  };
-
-  const handleResize = () => {
-    setIsResizing(true);
-    handleCloseContextMenu();
-  };
+  // Clean up any global styles when component unmounts
+  useEffect(() => {
+    return () => {
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, []);
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return; // Only left mouse button
     e.stopPropagation();
-    
-    setStartPos({ x: e.clientX, y: e.clientY });
-    setIsDragging(true);
     onSelect();
+    
+    // Only start dragging if not clicking on the delete button or resize handle
+    const target = e.target as HTMLElement;
+    const isDeleteButton = target.closest('button[aria-label="delete"]') !== null;
+    const isResizeHandle = target === resizeHandleRef.current;
+    
+    if (!isDeleteButton && !isResizeHandle) {
+      setIsDragging(true);
+      setStartPos({ x: e.clientX, y: e.clientY });
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'move';
+    } else if (isResizeHandle) {
+      e.stopPropagation();
+      setIsResizing(true);
+      setStartPos({ x: e.clientX, y: e.clientY });
+      document.body.style.cursor = 'nwse-resize';
+    }
   };
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!isDragging && !isResizing) return;
-    
-    const dx = e.clientX - startPos.x;
-    const dy = e.clientY - startPos.y;
-    
-    if (isResizing) {
-      const newWidth = Math.max(120, dimensions.width + dx);
-      const newHeight = Math.max(24, dimensions.height + dy);
+    if (isDragging && onDragMove) {
+      const dx = e.clientX - startPos.x;
+      const dy = e.clientY - startPos.y;
+      onDragMove(id, dx, dy);
+      setStartPos({ x: e.clientX, y: e.clientY });
+    } else if (isResizing && onResize) {
+      const newWidth = Math.max(120, dimensions.width + (e.clientX - startPos.x));
+      const newHeight = Math.max(32, dimensions.height + (e.clientY - startPos.y));
       setDimensions({ width: newWidth, height: newHeight });
       onResize(id, newWidth, newHeight);
-    } else {
-      onDragMove(id, dx, dy);
+      setStartPos({ x: e.clientX, y: e.clientY });
     }
-    
-    setStartPos({ x: e.clientX, y: e.clientY });
-  }, [isDragging, isResizing, startPos, onDragMove, id, dimensions, onResize]);
+  }, [isDragging, isResizing, startPos, onDragMove, onResize, id, dimensions]);
 
   const handleMouseUp = useCallback(() => {
-    if (isDragging || isResizing) {
-      setIsDragging(false);
-      setIsResizing(false);
+    setIsDragging(false);
+    setIsResizing(false);
+    document.body.style.userSelect = '';
+    document.body.style.cursor = '';
+    
+    if (onDragEnd) {
       onDragEnd(id);
     }
-  }, [isDragging, isResizing, onDragEnd, id]);
+  }, [id, onDragEnd]);
 
-  // Set up event listeners for dragging/resizing
   useEffect(() => {
     if (isDragging || isResizing) {
       document.addEventListener('mousemove', handleMouseMove);
@@ -120,86 +115,95 @@ const DraggableCheckbox: React.FC<DraggableCheckboxProps> = ({
     }
   }, [isDragging, isResizing, handleMouseMove, handleMouseUp]);
 
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onDelete();
+  };
+
   const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation();
     onUpdate({ checked: e.target.checked });
   };
 
-  const cursorStyle = isResizing ? 'nwse-resize' : isDragging ? 'grabbing' : 'move';
-
   return (
-    <div
+    <Box
       ref={elementRef}
       onMouseDown={handleMouseDown}
-      onContextMenu={handleContextMenu}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
         position: 'absolute',
         left: x,
         top: y,
         width: dimensions.width,
         height: dimensions.height,
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 8px',
-        cursor: cursorStyle,
         zIndex,
+        cursor: 'pointer',
         ...style,
       }}
     >
-      <Checkbox
-        checked={checked}
-        onChange={handleCheckboxChange}
-        onClick={(e) => e.stopPropagation()}
-        size="small"
-        sx={{ padding: '4px' }}
-      />
-      <div
-        style={{
-          flex: 1,
-          marginLeft: '4px',
-          whiteSpace: 'nowrap',
+      <Paper
+        elevation={isSelected ? 8 : 2}
+        sx={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 8px',
+          position: 'relative',
           overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          userSelect: 'none',
-          border: isSelected ? '2px dashed #1976d2' : 'none',
-          padding: '2px',
-          boxSizing: 'border-box',
+          '&:hover': {
+            boxShadow: isSelected ? 8 : 4,
+          },
         }}
       >
-        {label}
-      </div>
-
-      {/* Resize handle */}
-      {isSelected && !isResizing && (
-        <div
-          style={{
-            position: 'absolute',
-            right: -6,
-            bottom: -6,
-            width: 12,
-            height: 12,
-            backgroundColor: '#1976d2',
-            borderRadius: '50%',
-            cursor: 'nwse-resize',
-            zIndex: zIndex + 1,
-          }}
-          onMouseDown={(e) => {
-            e.stopPropagation();
-            setIsResizing(true);
-            setStartPos({ x: e.clientX, y: e.clientY });
-            onSelect();
-          }}
+        <Checkbox
+          checked={checked}
+          onChange={handleCheckboxChange}
+          onClick={(e) => e.stopPropagation()}
+          size="small"
+          sx={{ mr: 1 }}
         />
-      )}
-
-      {/* Context Menu */}
-      <ContextMenu
-        contextMenu={contextMenu}
-        onClose={handleCloseContextMenu}
-        onDelete={handleDelete}
-        onMove={handleMove}
-        onResize={handleResize}
-      />
-    </div>
+        <Box sx={{ flexGrow: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {label}
+        </Box>
+        
+        {isSelected && (
+          <>
+            <div
+              ref={resizeHandleRef}
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                right: 0,
+                width: 12,
+                height: 12,
+                backgroundColor: 'primary.main',
+                cursor: 'nwse-resize',
+                borderTopLeftRadius: '2px',
+              }}
+            />
+            
+            <IconButton
+              size="small"
+              onClick={handleDelete}
+              sx={{
+                position: 'absolute',
+                top: 0,
+                right: 0,
+                backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                '&:hover': {
+                  backgroundColor: 'rgba(255, 0, 0, 0.2)',
+                },
+              }}
+              aria-label="delete"
+            >
+              <DeleteIcon fontSize="small" color="error" />
+            </IconButton>
+          </>
+        )}
+      </Paper>
+    </Box>
   );
 };
 
