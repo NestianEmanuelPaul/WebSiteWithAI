@@ -234,68 +234,6 @@ const DraggableCheckbox: React.FC<DraggableCheckboxProps> = ({
     onUpdate({ checked: e.target.checked });
   };
 
-  // Resize handle component
-  const ResizeHandle = useMemo(() => {
-    const handleMouseDown = (e: React.MouseEvent) => {
-      console.log('Resize handle mouse down - event:', {
-        target: e.target,
-        currentTarget: e.currentTarget,
-        clientX: e.clientX,
-        clientY: e.clientY
-      });
-      
-      e.stopPropagation();
-      e.preventDefault();
-      
-      // Set initial position for resizing
-      setIsResizing(true);
-      setStartPos({ x: e.clientX, y: e.clientY });
-      document.body.style.cursor = 'nwse-resize';
-      
-      // Add a temporary class to the body to prevent text selection during resize
-      document.body.classList.add('resizing');
-      
-      // Add a one-time mouseup listener to clean up
-      const handleMouseUp = () => {
-        console.log('Resize handle mouse up');
-        document.body.style.cursor = '';
-        document.body.classList.remove('resizing');
-        document.removeEventListener('mouseup', handleMouseUp);
-      };
-      
-      document.addEventListener('mouseup', handleMouseUp, { once: true });
-    };
-    
-    return function ResizeHandleComponent() {
-      return (
-        <div 
-          ref={resizeHandleRef}
-          className="resize-handle"
-          style={{
-            position: 'absolute',
-            right: 0,
-            bottom: 0,
-            width: 16,
-            height: 16,
-            backgroundColor: isSelected ? '#4CAF50' : 'transparent',
-            borderBottom: '2px solid #4CAF50',
-            borderRight: '2px solid #4CAF50',
-            cursor: 'nwse-resize',
-            zIndex: 1001,
-            pointerEvents: 'auto',
-            boxSizing: 'border-box',
-          }}
-          onMouseDown={handleMouseDown}
-          onClick={(e) => {
-            console.log('Resize handle click');
-            e.stopPropagation();
-            e.preventDefault();
-          }}
-        />
-      );
-    };
-  }, [isSelected, resizeHandleRef]);
-
   return (
     <React.Fragment>
       <GlobalResizeStyles />
@@ -317,6 +255,7 @@ const DraggableCheckbox: React.FC<DraggableCheckboxProps> = ({
       >
         <Paper
           elevation={isSelected ? 8 : 2}
+          onClick={onSelect}
           sx={{
             width: '100%',
             height: '100%',
@@ -359,7 +298,22 @@ const DraggableCheckbox: React.FC<DraggableCheckboxProps> = ({
             {label}
           </Box>
           
-          {isSelected && <ResizeHandle />}
+          {isSelected && (
+            <div
+              ref={resizeHandleRef}
+              className="resize-handle"
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                right: 0,
+                width: 12,
+                height: 12,
+                backgroundColor: 'primary.main',
+                cursor: 'nwse-resize',
+                borderTopLeftRadius: '2px',
+              }}
+            />
+          )}
           
           {isSelected && (
             <IconButton
@@ -369,18 +323,13 @@ const DraggableCheckbox: React.FC<DraggableCheckboxProps> = ({
                 position: 'absolute',
                 top: 0,
                 right: 0,
-                transform: 'translate(50%, -50%)',
-                backgroundColor: 'error.main',
-                color: 'white',
-                width: 20,
-                height: 20,
+                backgroundColor: 'rgba(255, 255, 255, 0.8)',
                 '&:hover': {
-                  backgroundColor: 'error.dark',
+                  backgroundColor: 'rgba(255, 0, 0, 0.2)',
                 },
               }}
-              aria-label="delete"
             >
-              <DeleteIcon fontSize="small" />
+              <DeleteIcon fontSize="small" color="error" />
             </IconButton>
           )}
         </Paper>
