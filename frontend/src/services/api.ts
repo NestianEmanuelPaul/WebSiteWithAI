@@ -15,87 +15,72 @@ export interface ApiElement {
 
 export const saveElements = async (elements: ElementData[]): Promise<void> => {
   try {
-    console.log('Saving elements:', elements);
+    console.group('Saving elements');
+    console.log('Input elements:', JSON.parse(JSON.stringify(elements)));
     
     const payload = elements.map(element => {
-      // Create base element with common properties
+      // Create a clean copy of the element with only necessary properties
+      const { id, type, x, y, width, height, ...rest } = element;
+      
       const baseElement: any = {
-        element_id: element.id,
-        element_type: element.type,
-        x: Math.round(element.x),
-        y: Math.round(element.y),
+        element_id: id,
+        element_type: type,
+        x: Math.round(x),
+        y: Math.round(y),
         properties: {
+          width,
+          height,
+          ...rest,
+          // Add type-specific defaults
           text: (element as any).text || (element as any).label || 
-                (element.type === 'button' ? 'Button' : 
-                 element.type === 'checkbox' ? 'Checkbox' : 'Element'),
-          ...(element as any).style
+                (type === 'button' ? 'Button' : 
+                 type === 'checkbox' ? 'Checkbox' : 'Element')
         }
       };
+
+      // Clean up any undefined values in properties
+      Object.keys(baseElement.properties).forEach(key => {
+        if (baseElement.properties[key] === undefined) {
+          delete baseElement.properties[key];
+        }
+      });
       
-      // Add element-specific properties
-      if (element.type === 'button') {
-        // For buttons, include width and height in properties
-        if ('width' in element) baseElement.properties.width = element.width;
-        if ('height' in element) baseElement.properties.height = element.height;
-      } else if (element.type === 'checkbox') {
-        // For checkboxes, include checked state
-        baseElement.properties.checked = (element as any).checked || false;
-      }
-      
-      console.log('Processed element payload:', JSON.stringify(baseElement, null, 2));
+      console.log(`Processed element ${element.id}:`, JSON.parse(JSON.stringify(baseElement)));
       return baseElement;
     });
-    
-    console.log('Sending payload to server:', JSON.stringify(payload, null, 2));
+
+    console.log('Final payload being sent to server:', JSON.parse(JSON.stringify(payload)));
     
     const response = await fetch(`${API_BASE_URL}/elements/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json',
       },
       body: JSON.stringify(payload),
     });
-    
+
     if (!response.ok) {
-      // Only try to parse as JSON, otherwise fallback to text, only once
-      let errorData = null;
-      let errorText = '';
-      try {
-        errorData = await response.json();
-      } catch (e) {
-        try {
-          errorText = await response.text();
-        } catch (e2) {
-          errorText = '[unreadable response body]';
-        }
-      }
-      const errorMessage = errorData?.detail || errorData?.message || errorText || response.statusText;
-      console.error('Save failed with status:', response.status, 'Error details:', errorData || errorText);
-      throw new Error(`Failed to save elements: ${response.status} ${response.statusText} - ${JSON.stringify(errorMessage)}`);
+      const errorData = await response.json().catch(() => ({}));
+      console.error('Save failed with status:', response.status, 'Error:', errorData);
+      throw new Error(`Failed to save elements: ${response.status} ${response.statusText}`);
     }
-    // Only read the response body once
-    let responseData = null;
-    try {
-      responseData = await response.json();
-    } catch (e) {
-      responseData = null;
-    }
-    console.log('Elements saved successfully:', responseData);
-    return responseData;
+
+    const result = await response.json();
+    console.log('Save successful, server response:', result);
+    console.groupEnd();
+    return result;
   } catch (error) {
-    console.error('Error in saveElements:', {
-      error,
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined
-    });
+    console.error('Error in saveElements:', error);
+    console.groupEnd();
     throw error;
   }
 };
 
 export const loadElements = async (): Promise<ElementData[]> => {
   try {
-    console.log('Loading elements from:', `${API_BASE_URL}/elements/`);
+    console.group('Loading elements');
+    console.log('Fetching elements from:', `${API_BASE_URL}/elements/`);
+    
     const response = await fetch(`${API_BASE_URL}/elements/`, {
       method: 'GET',
       headers: {
@@ -110,41 +95,31 @@ export const loadElements = async (): Promise<ElementData[]> => {
     }
 
     const data: ApiElement[] = await response.json();
+    console.log('Raw data from server:', JSON.parse(JSON.stringify(data)));
     
-    return Array.isArray(data) 
+    const processedElements = Array.isArray(data) 
       ? data.map(element => {
           const baseElement: any = {
             id: element.element_id,
-            type: element.element_type as ElementType,
+            type: element.element_type,
             x: element.x || 0,
             y: element.y || 0,
-            zIndex: element.properties?.zIndex || 0,
-            text: element.properties?.text || element.properties?.label || (element.element_type === 'button' ? 'Button' : 'Checkbox'),
-            style: {}
+            width: element.properties?.width || 150,
+            height: element.properties?.height || 40,
+            ...element.properties
           };
-
-          // Extract style properties
-          if (element.properties) {
-            const { text, label, checked, width, height, ...style } = element.properties;
-            baseElement.style = style;
-            
-            // Add button-specific properties
-            if (element.element_type === 'button') {
-              if (width !== undefined) baseElement.width = width;
-              if (height !== undefined) baseElement.height = height;
-            }
-            
-            // Add checkbox-specific properties
-            if (element.element_type === 'checkbox') {
-              baseElement.checked = checked || false;
-            }
-          }
           
+          console.log(`Processed element ${element.element_id}:`, JSON.parse(JSON.stringify(baseElement)));
           return baseElement as ElementData;
         })
       : [];
+    
+    console.log('Final processed elements:', JSON.parse(JSON.stringify(processedElements)));
+    console.groupEnd();
+    return processedElements;
   } catch (error) {
     console.error('Error in loadElements:', error);
+    console.groupEnd();
     throw error;
   }
 };

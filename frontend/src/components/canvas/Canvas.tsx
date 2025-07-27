@@ -195,14 +195,20 @@ const Canvas: React.FC<CanvasProps> = ({
     }
   };
 
-  // Update element position or properties
-  const updateElement = <T extends ElementData>(id: string, updates: Partial<Omit<T, 'id' | 'type'>>) => {
-    handleElementsChange(
-      elements.map(el => 
-        el.id === id ? { ...el, ...updates } as T : el
-      ) as ElementData[]
+  // Function to update an element's properties
+  const updateElement = useCallback((elementId: string, updates: Partial<Omit<ElementData, 'id' | 'type'>>) => {
+    console.log('Updating element:', { elementId, updates });
+    setElements(prevElements => 
+      prevElements.map(el => {
+        if (el.id === elementId) {
+          const updated = { ...el, ...updates };
+          console.log('Element updated:', updated);
+          return updated;
+        }
+        return el;
+      })
     );
-  };
+  }, []);
 
   // Delete an element
   const deleteElement = (id: string) => {
@@ -287,29 +293,16 @@ const Canvas: React.FC<CanvasProps> = ({
     handleClose();
   }, [contextMenu, elements, handleClose]);
 
-  // Handle save button click
+  // Save elements to the server
   const handleSave = useCallback(async () => {
+    console.log('Saving elements:', elements);
     try {
       await saveElements(elements);
-      setSaveStatus({
-        open: true,
-        success: true,
-        message: 'Canvas saved successfully!'
-      });
-      
-      // Call the onSave callback if provided
-      if (onSave) {
-        onSave(elements);
-      }
+      console.log('Elements saved successfully');
     } catch (error) {
-      console.error('Error saving canvas:', error);
-      setSaveStatus({
-        open: true,
-        success: false,
-        message: 'Failed to save canvas. Please try again.'
-      });
+      console.error('Failed to save elements:', error);
     }
-  }, [elements, onSave]);
+  }, [elements]);
 
   // Handle close of the snackbar
   const handleCloseSnackbar = () => {
@@ -427,6 +420,14 @@ const Canvas: React.FC<CanvasProps> = ({
             label={element.label || 'Checkbox'}
             checked={element.checked || false}
             zIndex={element.zIndex || 1}
+            onUpdate={(updates) => updateElement(elementId, updates as Partial<Omit<CheckboxElement, 'id' | 'type'>>)}
+            onResize={(id: string, newWidth: number, newHeight: number) => {
+              // Update the element's dimensions in the state
+              updateElement(id, { 
+                width: newWidth,
+                height: newHeight 
+              } as Partial<Omit<CheckboxElement, 'id' | 'type'>>);
+            }}
             onChange={(checked: boolean) => {
               updateElement(elementId, { 
                 checked 
