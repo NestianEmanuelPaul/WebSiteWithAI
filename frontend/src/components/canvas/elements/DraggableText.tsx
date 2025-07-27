@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import ContextMenu from './ContextMenu';
+import IconButton from '@mui/material/IconButton';
+import DeleteIcon from '@mui/icons-material/Delete';
 import type { TextElement } from '../../../types/element';
 import styles from './DraggableText.module.css';
 
@@ -38,12 +39,13 @@ const DraggableText: React.FC<DraggableTextProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
-  const [contextMenu, setContextMenu] = useState<{ mouseX: number; mouseY: number } | null>(null);
+  
   const [isEditing, setIsEditing] = useState(false);
   const [textContent, setTextContent] = useState(content);
   const [dimensions, setDimensions] = useState({ width, height });
+  const [textAreaHeight, setTextAreaHeight] = useState('auto');
   const elementRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Update internal state when content prop changes
   useEffect(() => {
@@ -55,33 +57,8 @@ const DraggableText: React.FC<DraggableTextProps> = ({
     setDimensions({ width, height });
   }, [width, height]);
 
-  const handleContextMenu = (event: React.MouseEvent) => {
-    event.preventDefault();
-    onSelect();
-    setContextMenu(
-      contextMenu === null
-        ? { mouseX: event.clientX, mouseY: event.clientY }
-        : null,
-    );
-  };
-
-  const handleCloseContextMenu = () => {
-    setContextMenu(null);
-  };
-
   const handleDelete = () => {
     onDelete();
-    handleCloseContextMenu();
-  };
-
-  const handleMove = () => {
-    setIsResizing(false);
-    handleCloseContextMenu();
-  };
-
-  const handleResize = () => {
-    setIsResizing(true);
-    handleCloseContextMenu();
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -144,14 +121,19 @@ const DraggableText: React.FC<DraggableTextProps> = ({
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      (e.target as HTMLInputElement).blur();
+      (e.target as HTMLTextAreaElement).blur();
     } else if (e.key === 'Escape') {
       setTextContent(content);
       setIsEditing(false);
     }
+    
+    // Auto-grow the textarea
+    const target = e.target as HTMLTextAreaElement;
+    target.style.height = 'auto';
+    target.style.height = `${Math.min(target.scrollHeight, 500)}px`; // Limit max height to 500px
   };
 
   const cursorStyle = isResizing ? styles.draggableTextResizing : isDragging ? styles.draggableTextDragging : '';
@@ -168,7 +150,7 @@ const DraggableText: React.FC<DraggableTextProps> = ({
     <div
       ref={elementRef}
       onMouseDown={handleMouseDown}
-      onContextMenu={handleContextMenu}
+      
       onDoubleClick={handleDoubleClick}
       className={dynamicClasses}
       style={{
@@ -185,13 +167,17 @@ const DraggableText: React.FC<DraggableTextProps> = ({
       data-testid="draggable-text"
     >
       {isEditing ? (
-        <input
+        <textarea
           ref={inputRef}
-          type="text"
           aria-label="Edit text content"
           placeholder="Type your text here"
           value={textContent}
-          onChange={(e) => setTextContent(e.target.value)}
+          onChange={(e) => {
+            setTextContent(e.target.value);
+            // Auto-grow the textarea
+            e.target.style.height = 'auto';
+            e.target.style.height = `${Math.min(e.target.scrollHeight, 500)}px`; // Limit max height to 500px
+          }}
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           autoFocus
@@ -202,7 +188,18 @@ const DraggableText: React.FC<DraggableTextProps> = ({
             fontFamily,
             textAlign: textAlign as 'left' | 'center' | 'right' | 'justify',
             width: '100%',
-            height: '100%',
+            minHeight: '100%',
+            resize: 'none',
+            whiteSpace: 'pre-wrap',
+            wordWrap: 'break-word',
+            overflowWrap: 'break-word',
+            overflow: 'hidden',
+            overflowY: 'auto',
+            border: 'none',
+            outline: 'none',
+            background: 'transparent',
+            padding: '2px',
+            boxSizing: 'border-box',
           }}
         />
       ) : (
@@ -213,11 +210,27 @@ const DraggableText: React.FC<DraggableTextProps> = ({
             color,
             fontFamily,
             textAlign: textAlign as 'left' | 'center' | 'right' | 'justify',
+            width: '100%',
+            height: '100%',
+            wordWrap: 'break-word',
+            whiteSpace: 'pre-wrap',
+            overflow: 'hidden',
+            overflowWrap: 'break-word',
+            wordBreak: 'break-word',
           }}
           dangerouslySetInnerHTML={{ __html: textContent.replace(/\n/g, '<br />') }}
         />
       )}
       {/* Resize handle */}
+      {isSelected && onDelete && !isEditing && (
+        <IconButton
+          size="small"
+          onClick={(e)=>{e.stopPropagation();handleDelete();}}
+          sx={{position:'absolute',top:0,right:0,backgroundColor:'rgba(255,255,255,0.8)','&:hover':{backgroundColor:'rgba(255,0,0,0.2)'}}}
+        >
+          <DeleteIcon fontSize="small" color="error" />
+        </IconButton>
+      )}
       {isSelected && !isResizing && (
         <div
           style={{
@@ -239,14 +252,7 @@ const DraggableText: React.FC<DraggableTextProps> = ({
           }}
         />
       )}
-      {/* Context Menu */}
-      <ContextMenu
-        contextMenu={contextMenu}
-        onClose={handleCloseContextMenu}
-        onDelete={handleDelete}
-        onMove={handleMove}
-        onResize={handleResize}
-      />
+
     </div>
   );
 };
