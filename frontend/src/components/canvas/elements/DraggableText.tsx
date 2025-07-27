@@ -222,7 +222,7 @@ const DraggableText: React.FC<DraggableTextProps> = ({
         />
       )}
       {/* Resize handle */}
-      {isSelected && onDelete && !isEditing && (
+      {isSelected && !isEditing && (
         <IconButton
           size="small"
           onClick={(e)=>{e.stopPropagation();handleDelete();}}

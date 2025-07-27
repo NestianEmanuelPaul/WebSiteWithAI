@@ -160,6 +160,8 @@ const DraggableText: React.FC<DraggableTextProps> = ({
       {isEditing ? (
         <input
           type="text"
+          aria-label="Edit text"
+          placeholder="Enter text here"
           autoFocus
           value={localText}
           onChange={(e) => setLocalText(e.target.value)}
@@ -213,6 +215,7 @@ const DraggableText: React.FC<DraggableTextProps> = ({
 
       {(isSelected || isHovered) && onDelete && !isEditing && (
         <button
+          aria-label="Delete text element"
           onClick={(e) => {
             e.stopPropagation();
             onDelete(id);
