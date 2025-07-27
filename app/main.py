@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field, Json
 from typing import List, Optional, Dict, Any, Union
 import os
 import json
+from typing import Optional, Dict, Any
+import openai
 
 # Initialize FastAPI app
 app = FastAPI(title="AI-Powered Visual Development Platform",
@@ -598,6 +600,81 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
 def list_projects(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
     projects = db.query(Project).offset(skip).limit(limit).all()
     return projects
+
+# AI Code Generation Models
+class AICodeGenerationRequest(BaseModel):
+    element_type: str
+    element_id: str
+    table_name: str
+    field_name: str
+    action: str  # e.g., 'read', 'write', 'both'
+    current_code: Optional[str] = None
+
+class AICodeGenerationResponse(BaseModel):
+    success: bool
+    generated_code: str
+    message: Optional[str] = None
+
+# Add this before the FastAPI app starts
+# You'll need to set OPENAI_API_KEY in your environment variables
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+@app.post("/api/ai/generate-code", response_model=AICodeGenerationResponse)
+async def generate_ai_code(request: AICodeGenerationRequest, db: Session = Depends(get_db)):
+    """
+    Generate code to connect a canvas element to a database field using AI
+    """
+    try:
+        # Get the database schema for context
+        schema = get_db_schema(db)
+        
+        # Create a prompt for the AI
+        prompt = f"""
+        You are an expert web developer specializing in connecting UI elements to database fields.
+        
+        Task: Generate JavaScript/TypeScript code to connect a {request.element_type} element with ID '{request.element_id}'
+        to the database field '{request.field_name}' in table '{request.table_name}'.
+        
+        Action required: {request.action}
+        
+        Database schema context:
+        {schema}
+        
+        Current code (if any):
+        {request.current_code}
+        
+        Generate clean, well-commented code that:
+        1. Handles the connection between the UI element and the database field
+        2. Includes proper error handling
+        3. Follows best practices for the specified element type
+        4. Uses modern JavaScript/TypeScript syntax
+        """
+        
+        # Call the OpenAI API
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that generates clean, efficient code."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1000,
+            temperature=0.7
+        )
+        
+        generated_code = response.choices[0].message.content
+        
+        return AICodeGenerationResponse(
+            success=True,
+            generated_code=generated_code,
+            message="Code generated successfully"
+        )
+        
+    except Exception as e:
+        return AICodeGenerationResponse(
+            success=False,
+            generated_code="",
+            message=f"Error generating code: {str(e)}"
+        )
 
 # Create tables and ensure default project exists on startup
 @app.on_event("startup")

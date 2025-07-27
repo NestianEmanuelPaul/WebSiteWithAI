@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { API_BASE_URL } from './services/api';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import Canvas from './components/canvas/Canvas';
 import ElementsPalette from './components/palette/ElementsPalette';
@@ -15,19 +16,111 @@ import HomeIcon from '@mui/icons-material/Home';
 import { Drawer, Tooltip } from '@mui/material';
 import ViewListIcon from '@mui/icons-material/ViewList';
 import type { ElementData, ElementType } from './types/element';
+import { DatabaseFieldConnectionDialog } from './components/database/DatabaseFieldConnectionDialog';
+import type { DatabaseSchema } from './services/api';
 
 function App() {
   const [showElements, setShowElements] = useState(true);
   const [elements, setElements] = useState<ElementData[]>([]);
+  const [schema, setSchema] = useState<DatabaseSchema | null>(null);
+  const [connectionDialogOpen, setConnectionDialogOpen] = useState(false);
+  const [selectedElement, setSelectedElement] = useState<ElementData | null>(null);
 
   // Save elements when they change
-  const handleSave = (newElements: ElementData[]) => {
-    setElements(newElements);
+  const handleSave = async (newElements: ElementData[]) => {
+    try {
+      // Update local state
+      setElements(newElements);
+      
+      // Format elements for the backend
+      const formattedElements = newElements.map(element => {
+        const { id, type, x, y, width, height, ...properties } = element;
+        return {
+          element_id: id,
+          element_type: type,
+          x,
+          y,
+          properties: {
+            ...properties,
+            width,
+            height,
+            // Ensure text or label is included for relevant elements
+            text: (element as any).text || (element as any).label || 
+                  (type === 'button' ? 'Button' : 
+                   type === 'checkbox' ? 'Checkbox' : 
+                   type === 'text' ? 'Text' : '')
+          }
+        };
+      });
+
+      console.log('Saving elements:', formattedElements);
+      
+      // Save to the backend
+      const response = await fetch(`${API_BASE_URL}/elements/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formattedElements),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Save failed with status:', response.status, 'Error:', errorData);
+        throw new Error(`Failed to save elements: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log('Save successful:', result);
+      return result;
+    } catch (error) {
+      console.error('Error saving elements:', error);
+      throw error; // Re-throw to be caught by the Canvas component
+    }
   };
 
   // Handle element drag start from palette
   const handleElementDragStart = (type: ElementType) => {
     console.log(`Dragging ${type} element`);
+  };
+
+  // Function to fetch the database schema
+  const fetchDatabaseSchema = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/database/schema`);
+      if (response.ok) {
+        const data = await response.json();
+        setSchema(data);
+      }
+    } catch (error) {
+      console.error('Error fetching database schema:', error);
+    }
+  };
+
+  // Call this when the app loads
+  useEffect(() => {
+    fetchDatabaseSchema();
+  }, []);
+
+  // Add this function to handle connecting an element to a database field
+  const handleConnectToDatabase = (element: ElementData) => {
+    setSelectedElement(element);
+    setConnectionDialogOpen(true);
+  };
+
+  // Add this function to handle the generated code
+  const handleApplyConnection = (code: string) => {
+    if (!selectedElement) return;
+    
+    // Update the element with the new code
+    const updatedElements = elements.map(el => 
+      el.id === selectedElement.id 
+        ? { ...el, data: { ...el.data, code } } 
+        : el
+    );
+    
+    setElements(updatedElements);
+    setSelectedElement(null);
   };
 
   return (
@@ -101,7 +194,17 @@ function App() {
                   <Canvas 
                     initialElements={elements} 
                     onSave={handleSave} 
-                    onElementDragStart={handleElementDragStart} 
+                    onElementDragStart={handleElementDragStart}
+                    onConnectToDatabase={handleConnectToDatabase}
+                  />
+                  <DatabaseFieldConnectionDialog
+                    open={connectionDialogOpen}
+                    onClose={() => setConnectionDialogOpen(false)}
+                    onConnect={handleApplyConnection}
+                    elementType={selectedElement?.type || ''}
+                    elementId={selectedElement?.id || ''}
+                    schema={schema}
+                    currentCode={selectedElement?.data?.code || ''}
                   />
                 </Box>
               </>
@@ -116,6 +219,25 @@ function App() {
           </Routes>
         </Box>
       </Box>
+      <DatabaseFieldConnectionDialog
+        open={connectionDialogOpen}
+        onClose={() => setConnectionDialogOpen(false)}
+        onConnect={handleApplyConnection}
+        elementType={selectedElement?.type || ''}
+        elementId={selectedElement?.id || ''}
+        schema={schema}
+        currentCode={selectedElement?.data?.code}
+      />
+      {selectedElement && (
+        <Button 
+          variant="contained" 
+          color="primary"
+          onClick={() => handleConnectToDatabase(selectedElement)}
+          sx={{ position: 'absolute', top: 16, right: 200, zIndex: 1000 }}
+        >
+          Connect to Database
+        </Button>
+      )}
     </Router>
   );
 }

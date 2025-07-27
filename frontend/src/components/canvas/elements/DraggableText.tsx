@@ -12,6 +12,7 @@ interface DraggableTextProps extends Omit<TextElement, 'type'> {
   onDragEnd: (id: string) => void;
   onResize: (id: string, width: number, height: number) => void;
   onUpdate: (updates: Partial<TextElement>) => void;
+  onContextMenu?: (event: React.MouseEvent) => void;
   style?: React.CSSProperties;
   zIndex: number;
 }
@@ -34,6 +35,7 @@ const DraggableText: React.FC<DraggableTextProps> = ({
   onDragEnd,
   onResize,
   onUpdate,
+  onContextMenu,
   zIndex,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
@@ -150,7 +152,11 @@ const DraggableText: React.FC<DraggableTextProps> = ({
     <div
       ref={elementRef}
       onMouseDown={handleMouseDown}
-      
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu?.(e);
+        onSelect();
+      }}
       onDoubleClick={handleDoubleClick}
       className={dynamicClasses}
       style={{

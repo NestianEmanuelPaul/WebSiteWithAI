@@ -14,6 +14,7 @@ interface DraggableCheckboxProps extends Omit<CheckboxElement, 'type'> {
   onDragEnd: (id: string) => void;
   onResize: (id: string, width: number, height: number) => void;
   onUpdate: (updates: Partial<CheckboxElement>) => void;
+  onContextMenu?: (event: React.MouseEvent) => void;
   style?: React.CSSProperties;
   zIndex: number;
 }
@@ -54,6 +55,7 @@ const DraggableCheckbox: React.FC<DraggableCheckboxProps> = ({
   onDragEnd,
   onResize,
   onUpdate,
+  onContextMenu,
   style,
   zIndex,
 }) => {
@@ -240,6 +242,11 @@ const DraggableCheckbox: React.FC<DraggableCheckboxProps> = ({
       <Box
         ref={elementRef}
         onMouseDown={handleMouseDown}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onContextMenu?.(e);
+          onSelect();
+        }}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
         style={{

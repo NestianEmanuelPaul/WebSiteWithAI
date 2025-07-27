@@ -28,6 +28,7 @@ export interface DraggableButtonProps {
   inMoveMode?: boolean;
   onChange?: (updates: Record<string, any>) => void;
   onSelect?: () => void;
+  onContextMenu?: (event: React.MouseEvent) => void;
 }
 
 export const DraggableButton: FC<DraggableButtonProps> = ({
@@ -45,7 +46,8 @@ export const DraggableButton: FC<DraggableButtonProps> = ({
   onDelete,
   onDragMove,
   onDragEnd,
-  onSelect
+  onSelect,
+  onContextMenu
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
@@ -145,10 +147,18 @@ export const DraggableButton: FC<DraggableButtonProps> = ({
     <Box
       ref={buttonRef}
       onMouseDown={handleMouseDown}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu?.(e);
+        onSelect?.();
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onSelect?.();
-        onClick(e);
+        if (e.button === 0) { // Only handle left click
+          onClick(e);
+        }
       }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}

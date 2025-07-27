@@ -35,6 +35,7 @@ export interface BaseElementData {
   height: number;
   zIndex: number;
   style?: React.CSSProperties;
+  data?: Record<string, any>;
 }
 
 // Button Element

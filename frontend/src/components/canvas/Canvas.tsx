@@ -1,11 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Box, Menu, MenuItem, Button, Snackbar, Alert } from '@mui/material';
+import { Box, Button, Menu, MenuItem, Snackbar, Alert } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
+import type { ElementData, ElementType } from '../../types/element';
 import DraggableButton from './elements/DraggableButton';
-import DraggableCheckbox from './elements/DraggableCheckbox';
-import DraggableText from './elements/DraggableText';
-import type { ElementData, ElementType, CheckboxElement } from '../../types/element';
-import { saveElements, loadElements } from '../../services/api';
+import { DatabaseFieldConnectionDialog } from '../database/DatabaseFieldConnectionDialog';
+import { loadElements } from '../../services/api';
 
 const GRID_SIZE = 2; // Smaller grid size for precise snapping
 
@@ -13,12 +12,14 @@ interface CanvasProps {
   initialElements?: ElementData[];
   onSave?: (elements: ElementData[]) => void;
   onElementDragStart?: (type: ElementType) => void;
+  onConnectToDatabase?: (element: ElementData) => void;
 }
 
 const Canvas: React.FC<CanvasProps> = ({ 
   initialElements = [], 
   onSave,
-  onElementDragStart 
+  onElementDragStart,
+  onConnectToDatabase 
 }) => {
   const [elements, setElements] = useState<ElementData[]>(initialElements);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
@@ -58,11 +59,34 @@ const Canvas: React.FC<CanvasProps> = ({
     fetchSavedElements();
   }, []);
 
-  // Handle elements change and trigger onSave callback
-  const handleElementsChange = useCallback((newElements: ElementData[]) => {
+  // Update a specific element by ID
+  const updateElement = useCallback((id: string, updates: Partial<Omit<ElementData, 'id' | 'type'>>) => {
+    setElements(prevElements => 
+      prevElements.map(element => 
+        element.id === id ? { ...element, ...updates } : element
+      )
+    );
+  }, []);
+
+  // Handle elements change
+  const handleElementsChange = useCallback(async (newElements: ElementData[]) => {
     setElements(newElements);
     if (onSave) {
-      onSave(newElements);
+      try {
+        await onSave(newElements);
+        setSaveStatus({
+          open: true,
+          success: true,
+          message: 'Elements saved successfully!'
+        });
+      } catch (error) {
+        console.error('Error saving elements:', error);
+        setSaveStatus({
+          open: true,
+          success: false,
+          message: 'Failed to save elements. Please try again.'
+        });
+      }
     }
   }, [onSave]);
 
@@ -195,28 +219,68 @@ const Canvas: React.FC<CanvasProps> = ({
     }
   };
 
-  // Function to update an element's properties
-  const updateElement = useCallback((elementId: string, updates: Partial<Omit<ElementData, 'id' | 'type'>>) => {
-    console.log('Updating element:', { elementId, updates });
-    setElements(prevElements => 
-      prevElements.map(el => {
-        if (el.id === elementId) {
-          const updated = { ...el, ...updates };
-          console.log('Element updated:', updated);
-          return updated;
-        }
-        return el;
-      })
-    );
-  }, []);
-
-  // Delete an element
-  const deleteElement = (id: string) => {
-    handleElementsChange(elements.filter(el => el.id !== id));
+    // Delete an element
+  const deleteElement = useCallback((id: string) => {
+    const newElements = elements.filter(el => el.id !== id);
+    handleElementsChange(newElements);
     if (selectedElementId === id) {
       setSelectedElementId(null);
     }
+  }, [elements, handleElementsChange, selectedElementId]);
+
+  const handleCloseSnackbar = () => {
+    setSaveStatus({ open: false, success: false, message: '' });
   };
+
+  // State for database connection dialog
+  const [dbConnectionDialogOpen, setDbConnectionDialogOpen] = useState(false);
+  const [selectedElementForDb, setSelectedElementForDb] = useState<ElementData | null>(null);
+
+  // Handle context menu
+  const handleContextMenu = useCallback((event: React.MouseEvent, elementId: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    const element = elements.find(el => el.id === elementId);
+    if (!element) return;
+    
+    setSelectedElementId(elementId);
+    setSelectedElementForDb(element);
+    setContextMenu({
+      mouseX: event.clientX,
+      mouseY: event.clientY,
+      elementId
+    });
+  }, [elements]);
+  
+  // Handle connect to database menu item click
+  const handleConnectToDbClick = useCallback(() => {
+    setContextMenu(null);
+    setDbConnectionDialogOpen(true);
+  }, []);
+  
+  // Handle database connection dialog close
+  const handleDbDialogClose = useCallback(() => {
+    setDbConnectionDialogOpen(false);
+    setSelectedElementForDb(null);
+  }, []);
+  
+  // Handle successful database connection
+  const handleDbConnect = useCallback((code: string) => {
+    if (onConnectToDatabase && selectedElementForDb) {
+      // Create a new element with the database connection code
+      const updatedElement = {
+        ...selectedElementForDb,
+        data: {
+          ...selectedElementForDb.data,
+          databaseCode: code
+        }
+      };
+      onConnectToDatabase(updatedElement);
+    }
+    setDbConnectionDialogOpen(false);
+    setSelectedElementForDb(null);
+  }, [onConnectToDatabase, selectedElementForDb]);
 
   // Handle canvas click to deselect elements
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
@@ -239,7 +303,7 @@ const Canvas: React.FC<CanvasProps> = ({
   }, [mode, selectedElementId, mousePosition]);
 
   // Handle mouse move for crosshair
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (mode === 'move') {
       const canvasRect = canvasRef.current?.getBoundingClientRect();
       if (canvasRect) {
@@ -251,206 +315,48 @@ const Canvas: React.FC<CanvasProps> = ({
     }
   }, [mode]);
 
-  // Handle context menu
-  const handleContextMenu = useCallback((event: React.MouseEvent, elementId: string) => {
-    event.preventDefault();
-    setContextMenu(
-      contextMenu === null
-        ? {
-            mouseX: event.clientX + 2,
-            mouseY: event.clientY - 6,
-            elementId,
-          }
-        : null,
-    );
-  }, [contextMenu]);
-
-  const handleClose = useCallback(() => {
-    setContextMenu(null);
-  }, []);
-
-  // Update handleContextMenuAction to handle move mode
-  const handleContextMenuAction = useCallback((action: 'move' | 'resize') => {
-    if (!contextMenu?.elementId) return;
-    
-    if (action === 'move') {
-      setMode('move');
-      setSelectedElementId(contextMenu.elementId);
-      
-      // Set initial mouse position to the element's position
-      const element = elements.find(el => el.id === contextMenu.elementId);
-      if (element) {
-        setMousePosition({
-          x: element.x,
-          y: element.y
-        });
-      }
-    } else if (action === 'resize') {
-      // Handle resize logic here
-      console.log('Resize element', contextMenu.elementId);
-    }
-    
-    handleClose();
-  }, [contextMenu, elements, handleClose]);
-
-  // Save elements to the server
-  const handleSave = useCallback(async () => {
-    console.log('Saving elements:', elements);
-    try {
-      await saveElements(elements);
-      console.log('Elements saved successfully');
-    } catch (error) {
-      console.error('Failed to save elements:', error);
-    }
-  }, [elements]);
-
-  // Handle close of the snackbar
-  const handleCloseSnackbar = () => {
-    setSaveStatus(prev => ({ ...prev, open: false }));
-  };
-
-  // Add grid styles with smaller grid size
-  const gridStyles = {
-    position: 'absolute' as const,
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100%',
-    backgroundImage: 'linear-gradient(to right, rgba(0, 0, 0, 0.1) 1px, transparent 1px), linear-gradient(to bottom, rgba(0, 0, 0, 0.1) 1px, transparent 1px)',
-    backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`, // Smaller grid size
-    pointerEvents: 'none' as const,
-    opacity: mode === 'move' ? 1 : 0,
-    transition: 'opacity 0.2s',
-    zIndex: 999
-  };
-
-  // Add crosshair styles
-  const crosshairStyles = {
-    position: 'absolute' as const,
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100%',
-    pointerEvents: 'none' as const,
-    zIndex: 1000,
-    display: mode === 'move' && mousePosition ? 'block' : 'none',
-  };
-
-  const verticalLine = {
-    position: 'absolute' as const,
-    left: mousePosition?.x + 'px',
-    top: 0,
-    width: '1px',
-    height: '100%',
-    backgroundColor: 'rgba(0, 0, 255, 0.5)',
-    pointerEvents: 'none' as const,
-  };
-
-  const horizontalLine = {
-    position: 'absolute' as const,
-    top: mousePosition?.y + 'px',
-    left: 0,
-    width: '100%',
-    height: '1px',
-    backgroundColor: 'rgba(0, 0, 255, 0.5)',
-    pointerEvents: 'none' as const,
-  };
-
-  // Render element based on type
+  // Render a single element based on its type
   const renderElement = (element: ElementData) => {
-    // Extract the key and other props separately
-    const elementId = element.id;
-    
-    // Common props without the key
-    const commonProps = {
-      id: elementId,
-      x: element.x,
-      y: element.y,
-      width: element.width,
-      height: element.height,
-      isSelected: selectedElementId === elementId,
-      onSelect: () => setSelectedElementId(elementId),
-      onDelete: () => deleteElement(elementId),
-      onDragMove: (id: string, dx: number, dy: number) => {
-        updateElement(id, {
-          x: (elements.find(el => el.id === id)?.x || 0) + dx,
-          y: (elements.find(el => el.id === id)?.y || 0) + dy,
-        });
-      },
-      onDragEnd: () => {
-        // Any cleanup or additional logic when drag ends
-      },
-      onResize: (id: string, newWidth: number, newHeight: number) => {
-        updateElement(id, {
-          width: newWidth,
-          height: newHeight,
-        });
-      },
-      onUpdate: (updates: Partial<ElementData>) => {
-        // Cast to specific element type based on the element's type
-        updateElement(elementId, updates);
-      },
-      onClick: () => setSelectedElementId(elementId),
-      onContextMenu: (e: React.MouseEvent) => handleContextMenu(e, elementId),
-      style: { 
-        position: 'absolute' as const, 
-        cursor: 'move',
-        zIndex: element.zIndex || 1,
-        // Add any additional styles here
-      },
+    const handleClick = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setSelectedElementId(element.id);
     };
 
-    // Render the appropriate element based on type
     switch (element.type) {
       case 'button':
         return (
           <DraggableButton
-            key={elementId}
-            {...commonProps}
+            key={element.id}
+            id={element.id}
+            x={element.x}
+            y={element.y}
+            zIndex={element.zIndex || 1}
             text={element.text || 'Button'}
             variant={element.variant || 'contained'}
             color={element.color || 'primary'}
-          />
-        );
-      case 'checkbox':
-        return (
-          <DraggableCheckbox
-            key={elementId}
-            {...commonProps}
-            label={element.label || 'Checkbox'}
-            checked={element.checked || false}
-            zIndex={element.zIndex || 1}
-            onUpdate={(updates) => updateElement(elementId, updates as Partial<Omit<CheckboxElement, 'id' | 'type'>>)}
-            onResize={(id: string, newWidth: number, newHeight: number) => {
-              // Update the element's dimensions in the state
-              updateElement(id, { 
-                width: newWidth,
-                height: newHeight 
-              } as Partial<Omit<CheckboxElement, 'id' | 'type'>>);
+            width={element.width || 120}
+            height={element.height || 40}
+            isSelected={selectedElementId === element.id}
+            onContextMenu={(event: React.MouseEvent) => handleContextMenu(event, element.id)}
+            onClick={handleClick}
+            onDelete={() => deleteElement(element.id)}
+            onDragMove={(id, dx, dy) => {
+              updateElement(id, {
+                x: element.x + dx,
+                y: element.y + dy
+              });
             }}
-            onChange={(checked: boolean) => {
-              updateElement(elementId, { 
-                checked 
-              } as Partial<Omit<CheckboxElement, 'id' | 'type'>>);
+            onDragEnd={() => {
+              if (onSave) onSave(elements);
             }}
-          />
-        );
-      case 'text':
-        return (
-          <DraggableText
-            key={elementId}
-            {...commonProps}
-            content={element.content || 'Double click to edit'}
-            fontSize={element.fontSize || 16}
-            color={element.color || '#000000'}
-            fontFamily={element.fontFamily || 'Arial, sans-serif'}
-            textAlign={element.textAlign || 'left'}
-            onUpdate={(updates) => updateElement(elementId, updates)}
-            zIndex={element.zIndex || 1}
+            onResize={(id, newWidth, newHeight) => {
+              updateElement(id, { width: newWidth, height: newHeight });
+            }}
+            onSelect={() => setSelectedElementId(element.id)}
           />
         );
       default:
-        console.warn('Unknown element type:', element.type);
+        console.warn(`Unsupported element type: ${element.type}`);
         return null;
     }
   };
@@ -462,7 +368,13 @@ const Canvas: React.FC<CanvasProps> = ({
         variant="contained"
         color="primary"
         startIcon={<SaveIcon />}
-        onClick={handleSave}
+        onClick={async () => {
+          try {
+            await handleElementsChange(elements);
+          } catch (error) {
+            console.error('Error saving elements:', error);
+          }
+        }}
         sx={{
           position: 'absolute',
           top: 16,
@@ -506,70 +418,55 @@ const Canvas: React.FC<CanvasProps> = ({
           cursor: mode === 'move' ? 'crosshair' : 'default',
         }}
       >
-        {/* Grid Overlay */}
-        {mode === 'move' && <Box sx={gridStyles} />}
-        
-        {/* Crosshair */}
-        <Box sx={crosshairStyles}>
-          <Box sx={verticalLine} />
-          <Box sx={horizontalLine} />
-        </Box>
-        
-        {elements.map(renderElement)}
-        
-        {/* Context Menu */}
+        {/* Elements */}
+        {elements.map((element) => renderElement(element))}
+
+        {/* Context menu */}
         <Menu
           open={contextMenu !== null}
-          onClose={handleClose}
+          onClose={() => setContextMenu(null)}
           anchorReference="anchorPosition"
           anchorPosition={
-            contextMenu !== null
+            contextMenu !== null && contextMenu.elementId
               ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
               : undefined
           }
         >
-          <MenuItem onClick={() => handleContextMenuAction('move')}>Move</MenuItem>
-          <MenuItem onClick={() => handleContextMenuAction('resize')}>Resize</MenuItem>
+          <MenuItem onClick={handleConnectToDbClick}>Connect to Database</MenuItem>
         </Menu>
         
-        {/* Debug overlay - optional, can be removed in production */}
-        {process.env.NODE_ENV === 'development' && (
-          <Box
-            sx={{
-              position: 'fixed',
-              bottom: 16,
-              right: 16,
-              backgroundColor: 'rgba(0,0,0,0.7)',
-              color: 'white',
-              padding: '4px 8px',
-              borderRadius: 1,
-              fontSize: '0.8rem',
-              zIndex: 1000,
-              pointerEvents: 'none',
-            }}
-          >
-            Elements: {elements.length}
-          </Box>
+        {/* Database Connection Dialog */}
+        {selectedElementForDb && (
+          <DatabaseFieldConnectionDialog
+            open={dbConnectionDialogOpen}
+            onClose={handleDbDialogClose}
+            onConnect={handleDbConnect}
+            elementType={selectedElementForDb.type}
+            elementId={selectedElementForDb.id}
+            schema={null} // Pass your database schema here if available
+            currentCode={selectedElementForDb.data?.databaseCode || ''}
+          />
         )}
-      </Box>
 
-      {/* Snackbar for save status */}
-      <Snackbar
-        open={saveStatus.open}
-        autoHideDuration={3000}
-        onClose={handleCloseSnackbar}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-      >
-        <Alert 
-          onClose={handleCloseSnackbar} 
-          severity={saveStatus.success ? 'success' : 'error'}
-          sx={{ width: '100%' }}
+        {/* Snackbar for save status */}
+        <Snackbar
+          open={saveStatus.open}
+          autoHideDuration={6000}
+          onClose={handleCloseSnackbar}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         >
-          {saveStatus.message}
-        </Alert>
-      </Snackbar>
+          <Alert 
+            onClose={handleCloseSnackbar}
+            severity={saveStatus.success ? 'success' : 'error'}
+            sx={{ width: '100%' }}
+          >
+            {saveStatus.message}
+          </Alert>
+        </Snackbar>
+      </Box>
     </Box>
   );
 };
 
+// Export the component as default
 export default Canvas;

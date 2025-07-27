@@ -1,6 +1,6 @@
 import type { ElementData, ElementType } from '../types/element';
 
-const API_BASE_URL = 'http://localhost:8000/api/v1';
+export const API_BASE_URL = 'http://localhost:8000/api/v1';
 
 export interface DatabaseColumn {
   name: string;
@@ -32,6 +32,21 @@ export interface ApiElement {
   properties: Record<string, any>;
   created_at: string;
   updated_at: string;
+}
+
+export interface AICodeGenerationRequest {
+  element_type: string;
+  element_id: string;
+  table_name: string;
+  field_name: string;
+  action: 'read' | 'write' | 'both';
+  current_code?: string;
+}
+
+export interface AICodeGenerationResponse {
+  success: boolean;
+  generated_code: string;
+  message?: string;
 }
 
 export const saveElements = async (elements: ElementData[]): Promise<void> => {
@@ -157,5 +172,30 @@ export const loadElements = async (): Promise<ElementData[]> => {
     console.error('Error in loadElements:', error);
     console.groupEnd();
     throw error;
+  }
+};
+
+export const generateAICode = async (request: AICodeGenerationRequest): Promise<AICodeGenerationResponse> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/ai/generate-code`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to generate AI code');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error generating AI code:', error);
+    return {
+      success: false,
+      generated_code: '',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    };
   }
 };
