@@ -1,7 +1,7 @@
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Depends, Body, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, JSON, Text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, JSON, Text, inspect
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from pydantic import BaseModel, Field, Json
@@ -151,6 +151,40 @@ class ProjectResponse(ProjectBase):
 # Create tables
 def create_tables():
     Base.metadata.create_all(bind=engine)
+
+# Database schema inspection
+@app.get("/api/db/schema", response_model=Dict[str, Any])
+async def get_db_schema(db: Session = Depends(get_db)):
+    """Get the complete database schema including tables and columns"""
+    inspector = inspect(engine)
+    schema = {}
+    
+    for table_name in inspector.get_table_names():
+        columns = []
+        for column in inspector.get_columns(table_name):
+            columns.append({
+                "name": column["name"],
+                "type": str(column["type"]),
+                "nullable": column["nullable"],
+                "default": str(column["default"]) if column["default"] is not None else None,
+                "primary_key": column.get("primary_key", False)
+            })
+        
+        # Get foreign key relationships
+        foreign_keys = []
+        for fk in inspector.get_foreign_keys(table_name):
+            foreign_keys.append({
+                "constrained_columns": fk["constrained_columns"],
+                "referred_table": fk["referred_table"],
+                "referred_columns": fk["referred_columns"]
+            })
+        
+        schema[table_name] = {
+            "columns": columns,
+            "foreign_keys": foreign_keys
+        }
+    
+    return schema
 
 # API Routes
 @app.get("/api/v1/health")

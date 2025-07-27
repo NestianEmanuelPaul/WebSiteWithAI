@@ -1,6 +1,27 @@
 import type { ElementData, ElementType } from '../types/element';
 
-const API_BASE_URL = '/api/v1';
+const API_BASE_URL = 'http://localhost:8000/api/v1';
+
+export interface DatabaseColumn {
+  name: string;
+  type: string;
+  nullable: boolean;
+  default: string | null;
+  primary_key: boolean;
+}
+
+export interface DatabaseTable {
+  columns: DatabaseColumn[];
+  foreign_keys: Array<{
+    constrained_columns: string[];
+    referred_table: string;
+    referred_columns: string[];
+  }>;
+}
+
+export interface DatabaseSchema {
+  [tableName: string]: DatabaseTable;
+}
 
 export interface ApiElement {
   id: number;
@@ -72,6 +93,21 @@ export const saveElements = async (elements: ElementData[]): Promise<void> => {
   } catch (error) {
     console.error('Error in saveElements:', error);
     console.groupEnd();
+    throw error;
+  }
+};
+
+export const fetchDatabaseSchema = async (): Promise<DatabaseSchema> => {
+  try {
+    // Note: This endpoint is at /api/db/schema (without v1) in the backend
+    const response = await fetch('http://localhost:8000/api/db/schema');
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Error fetching database schema: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching database schema:', error);
     throw error;
   }
 };
