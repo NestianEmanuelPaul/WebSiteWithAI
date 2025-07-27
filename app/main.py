@@ -1,7 +1,7 @@
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Depends, Body, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, JSON, Text, inspect
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, JSON, Text, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from pydantic import BaseModel, Field, Json
@@ -185,6 +185,207 @@ async def get_db_schema(db: Session = Depends(get_db)):
         }
     
     return schema
+
+# Table operations
+class ForeignKeyReference(BaseModel):
+    table: str
+    column: str
+
+class ColumnCreate(BaseModel):
+    name: str
+    type: str
+    nullable: bool = True
+    default: Optional[str] = None
+    primary_key: bool = False
+    foreign_key: Optional[ForeignKeyReference] = None
+
+class TableCreate(BaseModel):
+    name: str
+    columns: List[ColumnCreate]
+
+@app.post("/api/db/tables/", status_code=201)
+async def create_table(table: TableCreate, db: Session = Depends(get_db)):
+    """Create a new table in the database"""
+    try:
+        # Start a transaction
+        connection = engine.connect()
+        trans = connection.begin()
+        
+        try:
+            # Generate the CREATE TABLE SQL
+            columns_sql = []
+            fk_constraints = []
+            
+            for idx, col in enumerate(table.columns):
+                col_def = f'"{col.name}" {col.type}'
+                if not col.nullable:
+                    col_def += ' NOT NULL'
+                if col.default is not None:
+                    col_def += f' DEFAULT {col.default}'
+                if col.primary_key:
+                    col_def += ' PRIMARY KEY'
+                columns_sql.append(col_def)
+                
+                # Add foreign key constraint if specified
+                if col.foreign_key:
+                    fk_name = f"fk_{table.name}_{col.name}_{idx}"
+                    fk_sql = f'CONSTRAINT "{fk_name}" FOREIGN KEY ("{col.name}") '
+                    fk_sql += f'REFERENCES "{col.foreign_key.table}" ("{col.foreign_key.column}")'
+                    fk_constraints.append(fk_sql)
+            
+            # Combine all SQL parts
+            all_constraints = columns_sql + fk_constraints
+            create_table_sql = f'CREATE TABLE "{table.name}" (\n  ' + ',\n  '.join(all_constraints) + '\n)'
+            
+            # Execute the SQL
+            connection.execute(text(create_table_sql))
+            
+            # Commit the transaction
+            trans.commit()
+            
+            # Return the created table schema
+            inspector = inspect(engine)
+            columns = []
+            for column in inspector.get_columns(table.name):
+                columns.append({
+                    "name": column["name"],
+                    "type": str(column["type"]),
+                    "nullable": column["nullable"],
+                    "default": str(column["default"]) if column["default"] is not None else None,
+                    "primary_key": column.get("primary_key", False)
+                })
+            
+            return {
+                "name": table.name,
+                "columns": columns,
+                "foreign_keys": []
+            }
+            
+        except Exception as e:
+            trans.rollback()
+            raise HTTPException(status_code=400, detail=f"Failed to create table: {str(e)}")
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    finally:
+        connection.close()
+
+class TableUpdate(TableCreate):
+    # Same as TableCreate but name is optional for updates
+    name: Optional[str] = None
+
+@app.put("/api/db/tables/{table_name}")
+async def update_table(
+    table_name: str,
+    table_update: TableUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update an existing table's schema"""
+    try:
+        # Start a transaction
+        connection = engine.connect()
+        trans = connection.begin()
+        
+        try:
+            inspector = inspect(engine)
+            
+            # Check if table exists
+            if table_name not in inspector.get_table_names():
+                raise HTTPException(status_code=404, detail=f"Table {table_name} not found")
+            
+            # Get existing columns and primary key
+            existing_columns = {col["name"]: col for col in inspector.get_columns(table_name)}
+            pk_columns = [col["name"] for col in existing_columns.values() if col.get("primary_key", False)]
+            
+            # Get existing foreign keys
+            existing_fks = {}
+            for fk in inspector.get_foreign_keys(table_name):
+                for col in fk["constrained_columns"]:
+                    existing_fks[col] = fk
+            
+            # Create a temporary table name
+            temp_table_name = f"{table_name}_temp_{int(datetime.utcnow().timestamp())}"
+            
+            # Build the new table definition
+            column_defs = []
+            fk_constraints = []
+            
+            # Process each column in the update
+            for col in table_update.columns:
+                # Build column definition
+                col_def = f'"{col.name}" {col.type}'
+                if not col.nullable:
+                    col_def += ' NOT NULL'
+                if col.default is not None and col.default != '':
+                    col_def += f' DEFAULT {col.default}'
+                if col.primary_key:
+                    col_def += ' PRIMARY KEY'
+                
+                column_defs.append(col_def)
+                
+                # Add foreign key constraint if needed
+                if col.foreign_key:
+                    fk_name = f"fk_{temp_table_name}_{col.name}"
+                    fk_sql = f'FOREIGN KEY ("{col.name}") REFERENCES "{col.foreign_key.table}" ("{col.foreign_key.column}")'
+                    fk_constraints.append(fk_sql)
+            
+            # Create the new table with all constraints
+            create_table_sql = f'CREATE TABLE "{temp_table_name}" (\n  ' + ',\n  '.join(column_defs + fk_constraints) + '\n)'
+            connection.execute(text(create_table_sql))
+            
+            # Copy data from old table to new table
+            if table_update.columns:
+                # Get common columns between old and new schema
+                common_columns = [f'"{col.name}"' for col in table_update.columns 
+                                if col.name in existing_columns]
+                
+                if common_columns:
+                    columns_str = ', '.join(common_columns)
+                    copy_sql = f'INSERT INTO "{temp_table_name}" ({columns_str}) SELECT {columns_str} FROM "{table_name}"'
+                    connection.execute(text(copy_sql))
+            
+            # Drop the old table
+            connection.execute(text(f'DROP TABLE "{table_name}"'))
+            
+            # Rename the new table to the original name
+            connection.execute(text(f'ALTER TABLE "{temp_table_name}" RENAME TO "{table_name}"'))
+            
+            # Update table name if needed
+            if table_update.name and table_update.name != table_name:
+                connection.execute(text(f'ALTER TABLE "{table_name}" RENAME TO "{table_update.name}"'))
+                table_name = table_update.name
+            
+            # Commit the transaction
+            trans.commit()
+            
+            # Return the updated table schema
+            inspector = inspect(engine)
+            columns = []
+            for column in inspector.get_columns(table_name):
+                columns.append({
+                    "name": column["name"],
+                    "type": str(column["type"]),
+                    "nullable": column["nullable"],
+                    "default": str(column["default"]) if column["default"] is not None else None,
+                    "primary_key": column.get("primary_key", False)
+                })
+            
+            return {
+                "name": table_name,
+                "columns": columns,
+                "foreign_keys": inspector.get_foreign_keys(table_name)
+            }
+            
+        except Exception as e:
+            trans.rollback()
+            raise HTTPException(status_code=400, detail=f"Failed to update table: {str(e)}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    finally:
+        connection.close()
 
 # API Routes
 @app.get("/api/v1/health")
