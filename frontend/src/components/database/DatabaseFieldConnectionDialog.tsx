@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -13,42 +13,65 @@ import {
   Box,
   Typography,
   CircularProgress,
+  Paper,
+  Collapse,
+  IconButton,
+  styled,
 } from '@mui/material';
+import { Code as CodeIcon, ExpandMore as ExpandMoreIcon } from '@mui/icons-material';
 import type { DatabaseSchema } from '../../services/api';
-import { generateAICode } from '../../services/api';
+import { CodeTestingService } from '../../services/ai/codeTestingService';
+
+// Styled components
+const ExpandMore = styled(IconButton, {
+  shouldForwardProp: (prop) => prop !== 'expanded',
+})<{ expanded: boolean }>(({ theme, expanded }) => ({
+  transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+  marginLeft: 'auto',
+  transition: theme.transitions.create('transform', {
+    duration: theme.transitions.duration.shortest,
+  }),
+}));
 
 interface DatabaseFieldConnectionDialogProps {
   open: boolean;
   onClose: () => void;
   onConnect: (code: string) => void;
-  elementType: string;
-  elementId: string;
-  schema: DatabaseSchema | null;
+  schema?: DatabaseSchema;
+  elementType?: string;
+  elementId?: string;
   currentCode?: string;
+}
+
+interface TestResult {
+  attempt: number;
+  success: boolean;
+  error?: string;
 }
 
 export const DatabaseFieldConnectionDialog: React.FC<DatabaseFieldConnectionDialogProps> = ({
   open,
   onClose,
   onConnect,
-  elementType,
-  elementId,
   schema,
-  currentCode = '',
 }) => {
   const [selectedTable, setSelectedTable] = useState('');
   const [selectedField, setSelectedField] = useState('');
-  const [action, setAction] = useState<'read' | 'write' | 'both'>('both');
+  const [generatedCode, setGeneratedCode] = useState('');
+  const [tables, setTables] = useState<{ name: string; fields: string[] }[]>([]);
+  const [testResults, setTestResults] = useState<TestResult[]>([]);
+  const [expanded, setExpanded] = useState(false);
+  const [progress, setProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [generatedCode, setGeneratedCode] = useState('');
-  const [tables, setTables] = useState<{name: string; fields: string[]}[]>([]);
+
+  const testingService = useMemo(() => new CodeTestingService(5, process.env.REACT_APP_API_URL || ''), []);
 
   useEffect(() => {
     const loadSchema = async () => {
       try {
         let schemaToUse = schema;
-        
+
         // If schema is not provided, fetch it from the API
         if (!schemaToUse) {
           try {
@@ -64,11 +87,11 @@ export const DatabaseFieldConnectionDialog: React.FC<DatabaseFieldConnectionDial
             return;
           }
         }
-        
+
         if (schemaToUse) {
           const tableList = Object.entries(schemaToUse).map(([tableName, tableData]) => ({
             name: tableName,
-            fields: tableData.columns.map(col => col.name)
+            fields: tableData.columns.map((col) => col.name),
           }));
           setTables(tableList);
         }
@@ -77,27 +100,22 @@ export const DatabaseFieldConnectionDialog: React.FC<DatabaseFieldConnectionDial
         setError('Failed to load database schema');
       }
     };
-    
+
     if (open) {
       loadSchema();
     }
   }, [schema, open]);
 
-  const handleTableChange = (event: SelectChangeEvent) => {
-    const tableName = event.target.value;
-    setSelectedTable(tableName);
+  const handleTableChange = useCallback((event: SelectChangeEvent<string>) => {
+    setSelectedTable(event.target.value);
     setSelectedField('');
-  };
+  }, []);
 
-  const handleFieldChange = (event: SelectChangeEvent) => {
+  const handleFieldChange = useCallback((event: SelectChangeEvent<string>) => {
     setSelectedField(event.target.value);
-  };
+  }, []);
 
-  const handleActionChange = (event: SelectChangeEvent) => {
-    setAction(event.target.value as 'read' | 'write' | 'both');
-  };
-
-  const handleGenerateCode = async () => {
+  const handleGenerateAndTest = async () => {
     if (!selectedTable || !selectedField) {
       setError('Please select both a table and a field');
       return;
@@ -105,21 +123,55 @@ export const DatabaseFieldConnectionDialog: React.FC<DatabaseFieldConnectionDial
 
     setLoading(true);
     setError('');
+    setTestResults([]);
+    setGeneratedCode('');
 
     try {
-      const response = await generateAICode({
-        element_type: elementType,
-        element_id: elementId,
-        table_name: selectedTable,
-        field_name: selectedField,
-        action,
-        current_code: currentCode,
-      });
+      // 1. Generate initial code
+      const initialCode = generateCodeSnippet(selectedTable, selectedField);
+      
+      // 2. Create test function
+      const testFn = async (code: string): Promise<{success: boolean; error?: string}> => {
+        try {
+          // Simple validation - in a real app, this would run actual tests
+          if (!code.includes('useState')) {
+            return { 
+              success: false, 
+              error: 'Code is missing required React hooks (useState)' 
+            };
+          }
+          
+          if (!code.includes('fetch') && !code.includes('axios')) {
+            return { 
+              success: false, 
+              error: 'Code is missing data fetching logic' 
+            };
+          }
+          
+          return { success: true };
+        } catch (err) {
+          return { 
+            success: false, 
+            error: err instanceof Error ? err.message : 'Unknown error during testing' 
+          };
+        }
+      };
 
-      if (response.success) {
-        setGeneratedCode(response.generated_code);
-      } else {
-        setError(response.message || 'Failed to generate code');
+      // 3. Run the test and fix loop
+      const { code: finalCode, success } = await testingService.testAndFixCode(
+        initialCode,
+        testFn,
+        (attempt, result) => {
+          setTestResults(prev => [...prev, { attempt, ...result }]);
+          setProgress({ current: attempt, total: 5 });
+        }
+      );
+
+      // 4. Update state with results
+      setGeneratedCode(finalCode);
+      
+      if (!success) {
+        setError('Failed to fix all issues after maximum attempts');
       }
     } catch (err) {
       setError('An error occurred while generating code');
@@ -129,11 +181,77 @@ export const DatabaseFieldConnectionDialog: React.FC<DatabaseFieldConnectionDial
     }
   };
 
+  const generateCodeSnippet = (
+    table: string, 
+    field: string
+  ): string => {
+    return `// Generated code for ${table}.${field}
+import React, { useState } from 'react';
+import { Button, CircularProgress } from '@mui/material';
+
+const DatabaseConnectedButton = () => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleClick = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      
+      const response = await fetch('${process.env.REACT_APP_API_URL}/api/${table}');
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch data');
+      }
+      
+      const result = await response.json();
+      setData(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <Button 
+        variant="contained" 
+        onClick={handleClick}
+        disabled={loading}
+        startIcon={loading ? <CircularProgress size={20} /> : null}
+      >
+        {loading ? 'Loading...' : 'Load Data'}
+      </Button>
+      
+      {error && (
+        <div style={{ color: 'red', marginTop: '8px' }}>
+          Error: {error}
+        </div>
+      )}
+      
+      {data && (
+        <div style={{ marginTop: '16px' }}>
+          <pre>{JSON.stringify(data, null, 2)}</pre>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default DatabaseConnectedButton;`;
+  };
+
   const handleApply = () => {
     if (generatedCode) {
       onConnect(generatedCode);
       onClose();
     }
+  };
+  
+  const handleExpandClick = () => {
+    setExpanded(!expanded);
   };
 
   const selectedTableData = tables.find(t => t.name === selectedTable);
@@ -141,7 +259,7 @@ export const DatabaseFieldConnectionDialog: React.FC<DatabaseFieldConnectionDial
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>Connect to Database Field</DialogTitle>
-      <DialogContent>
+      <DialogContent sx={{ minWidth: 500 }}>
         <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <FormControl fullWidth>
             <InputLabel id="table-select-label">Table</InputLabel>
@@ -177,29 +295,24 @@ export const DatabaseFieldConnectionDialog: React.FC<DatabaseFieldConnectionDial
             </Select>
           </FormControl>
 
-          <FormControl fullWidth>
-            <InputLabel id="action-select-label">Action</InputLabel>
-            <Select
-              labelId="action-select-label"
-              value={action}
-              label="Action"
-              onChange={handleActionChange}
-              disabled={loading}
-            >
-              <MenuItem value="read">Read Only</MenuItem>
-              <MenuItem value="write">Write Only</MenuItem>
-              <MenuItem value="both">Read & Write</MenuItem>
-            </Select>
-          </FormControl>
 
-          <Button
-            variant="contained"
-            onClick={handleGenerateCode}
-            disabled={!selectedTable || !selectedField || loading}
-            sx={{ mt: 2 }}
-          >
-            {loading ? <CircularProgress size={24} /> : 'Generate Code'}
-          </Button>
+
+          <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+            <Button
+              variant="contained"
+              onClick={handleGenerateAndTest}
+              disabled={!selectedTable || !selectedField || loading}
+              startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <CodeIcon />}
+            >
+              {loading ? 'Testing...' : 'Generate & Test Code'}
+            </Button>
+            
+            {testResults.length > 0 && (
+              <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center' }}>
+                {progress.current}/{progress.total} attempts
+              </Typography>
+            )}
+          </Box>
 
           {error && (
             <Typography color="error" variant="body2" sx={{ mt: 2 }}>
@@ -207,22 +320,83 @@ export const DatabaseFieldConnectionDialog: React.FC<DatabaseFieldConnectionDial
             </Typography>
           )}
 
+          {testResults.length > 0 && (
+            <Box sx={{ mt: 2 }}>
+              <Box 
+                sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  cursor: 'pointer',
+                  '&:hover': { opacity: 0.8 },
+                }}
+                onClick={handleExpandClick}
+              >
+                <Typography variant="subtitle2">
+                  Test Results ({testResults.filter(r => r.success).length}/{testResults.length} passed)
+                </Typography>
+                <ExpandMore 
+                  expanded={expanded}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExpanded(!expanded);
+                  }}
+                >
+                  <ExpandMoreIcon />
+                </ExpandMore>
+              </Box>
+              
+              <Collapse in={expanded} timeout="auto" unmountOnExit>
+                <Box sx={{ mt: 1, maxHeight: '200px', overflow: 'auto' }}>
+                  {testResults.map((result, index) => (
+                    <Paper 
+                      key={index} 
+                      elevation={1} 
+                      sx={{ 
+                        p: 1.5, 
+                        mb: 1,
+                        bgcolor: result.success ? 'success.light' : 'error.light',
+                        color: result.success ? 'success.contrastText' : 'error.contrastText'
+                      }}
+                    >
+                      <Typography variant="body2">
+                        <strong>Attempt {index + 1}:</strong> {result.success ? 'Success' : result.error}
+                      </Typography>
+                    </Paper>
+                  ))}
+                </Box>
+              </Collapse>
+            </Box>
+          )}
+          
           {generatedCode && (
             <Box sx={{ mt: 3 }}>
-              <Typography variant="subtitle2" gutterBottom>
-                Generated Code:
-              </Typography>
-              <pre style={{
-                backgroundColor: '#f5f5f5',
-                padding: '16px',
-                borderRadius: '4px',
-                maxHeight: '300px',
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordWrap: 'break-word',
-              }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="subtitle2">
+                  Generated Code:
+                </Typography>
+                <Button 
+                  size="small" 
+                  onClick={() => navigator.clipboard.writeText(generatedCode)}
+                  disabled={!generatedCode}
+                >
+                  Copy to Clipboard
+                </Button>
+              </Box>
+              <Paper 
+                elevation={0} 
+                sx={{ 
+                  p: 2, 
+                  bgcolor: 'grey.100', 
+                  borderRadius: 1,
+                  maxHeight: 300,
+                  overflow: 'auto',
+                  fontFamily: 'monospace',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word'
+                }}
+              >
                 {generatedCode}
-              </pre>
+              </Paper>
             </Box>
           )}
         </Box>

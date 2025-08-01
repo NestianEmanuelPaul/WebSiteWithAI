@@ -443,7 +443,7 @@ const Canvas: React.FC<CanvasProps> = ({
             onConnect={handleDbConnect}
             elementType={selectedElementForDb.type}
             elementId={selectedElementForDb.id}
-            schema={null} // Pass your database schema here if available
+            schema={undefined} // Pass your database schema here if available
             currentCode={selectedElementForDb.data?.databaseCode || ''}
           />
         )}
