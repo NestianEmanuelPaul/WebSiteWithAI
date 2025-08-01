@@ -65,7 +65,24 @@ export const DatabaseFieldConnectionDialog: React.FC<DatabaseFieldConnectionDial
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+  // Get API URL from environment variable or use default localhost
+  const getApiUrl = () => {
+    try {
+      // For Create React App
+      if (typeof process !== 'undefined' && process.env.REACT_APP_API_URL) {
+        return process.env.REACT_APP_API_URL;
+      }
+      // For Vite or other bundlers
+      if (import.meta.env?.VITE_API_URL) {
+        return import.meta.env.VITE_API_URL;
+      }
+    } catch (e) {
+      console.warn('Error accessing environment variables:', e);
+    }
+    return 'http://localhost:8000';
+  };
+
+  const apiUrl = getApiUrl();
   const testingService = useMemo(() => new CodeTestingService(5, apiUrl), [apiUrl]);
 
   useEffect(() => {
