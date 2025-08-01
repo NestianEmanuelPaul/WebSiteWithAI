@@ -65,7 +65,8 @@ export const DatabaseFieldConnectionDialog: React.FC<DatabaseFieldConnectionDial
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const testingService = useMemo(() => new CodeTestingService(5, process.env.REACT_APP_API_URL || ''), []);
+  const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+  const testingService = useMemo(() => new CodeTestingService(5, apiUrl), [apiUrl]);
 
   useEffect(() => {
     const loadSchema = async () => {
