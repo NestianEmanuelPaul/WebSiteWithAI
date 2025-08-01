@@ -203,6 +203,9 @@ export const DatabaseFieldConnectionDialog: React.FC<DatabaseFieldConnectionDial
     table: string, 
     field: string
   ): string => {
+    // Use the same API URL that was determined at component mount
+    const apiBaseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+    
     return `// Generated code for ${table}.${field}
 import React, { useState } from 'react';
 import { Button, CircularProgress } from '@mui/material';
@@ -217,7 +220,8 @@ const DatabaseConnectedButton = () => {
       setLoading(true);
       setError('');
       
-      const response = await fetch('${process.env.REACT_APP_API_URL}/api/${table}');
+      // Use the API URL that was determined when the component mounted
+      const response = await fetch('${apiBaseUrl}/api/${table}');
       
       if (!response.ok) {
         throw new Error('Failed to fetch data');
